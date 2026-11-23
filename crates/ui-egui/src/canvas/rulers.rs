@@ -148,7 +148,12 @@ pub(super) fn rulers(app: &mut WordApp, ui: &mut Ui, h: Rect, v: Rect, rects: &[
             let _ = app.run("para.indents", json!({"right": (pt / 4.5).round() * 4.5}));
         }
     }
-    // Vertical.
+    // Vertical: the caret's page, unless it has been scrolled (mostly) out of view; then the page
+    // filling the most of the strip, so the ruler doesn't go blank on a long document.
+    let pi = vertical_page(pi, rects, v);
+    let (Some(page), Some(pr)) = (layout.pages.get(pi), rects.get(pi)) else { return };
+    let scale = page_screen_scale(*pr, page, scale);
+    let sect = app.session.doc.sections().get(page.section).map(|(_, s)| (*s).clone()).unwrap_or_default();
     let vp = ui.painter_at(v);
     let y0 = pr.min.y;
     let vbar = Rect::from_min_max(pos2(v.min.x + 4.0, y0), pos2(v.max.x - 3.0, pr.max.y));
@@ -166,6 +171,24 @@ pub(super) fn rulers(app: &mut WordApp, ui: &mut Ui, h: Rect, v: Rect, rects: &[
     }
     // In a table, its rows' bottom borders.
     crate::table_ruler::rows(app, ui, layout, pi, vbar, y0, scale);
+}
+
+/// The page the vertical ruler measures: the caret's page `caret` while at least a quarter of the
+/// ruler strip `v` shows it, else the page that shows most in the strip.
+pub(super) fn vertical_page(caret: usize, rects: &[Rect], v: Rect) -> usize {
+    let shown = |r: &Rect| (r.max.y.min(v.max.y) - r.min.y.max(v.min.y)).max(0.0);
+    let here = rects.get(caret).map_or(0.0, shown);
+    if here >= v.height() * 0.25 {
+        return caret;
+    }
+    rects
+        .iter()
+        .enumerate()
+        .rev() // Of pages side by side, the first.
+        .map(|(i, r)| (i, shown(r)))
+        .filter(|&(_, s)| s > here)
+        .max_by(|a, b| a.1.total_cmp(&b.1))
+        .map_or(caret, |(i, _)| i)
 }
 
 /// The indent markers' outlines on the horizontal ruler `bar`, each centred on its screen x:

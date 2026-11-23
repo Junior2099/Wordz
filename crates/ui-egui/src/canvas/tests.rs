@@ -3989,9 +3989,15 @@ fn the_rulers_span_the_caret_page_in_multiple_pages() {
     a.run("edit.goto", json!({"page": below + 1})).unwrap();
     let d = frames(&mut a, &mut t);
     let rects = a.canvas.page_rects.clone();
-    assert!(same_y(d.v_bar, rects[below]), "the vertical ruler spans page {}: {:?} vs {:?}", below + 1, d.v_bar, rects[below]);
+    // WordZ: while that page is out of view, the vertical ruler measures the page in view.
+    let area = a.canvas.canvas_rect.expect("the canvas was drawn");
+    let strip = Rect::from_min_max(pos2(area.min.x - RULER, area.min.y), pos2(area.min.x, area.max.y));
+    let shown = super::rulers::vertical_page(below, &rects, strip);
+    assert!(same_y(d.v_bar, rects[shown]), "the vertical ruler spans page {}: {:?} vs {:?}", shown + 1, d.v_bar, rects[shown]);
     assert!(same_x(d.h_bar, rects[below]));
-    assert!(!same_y(d.v_bar, rects[0]), "page 1 is in the row above");
+    if shown == below {
+        assert!(!same_y(d.v_bar, rects[0]), "page 1 is in the row above");
+    }
 }
 
 /// #1878: the rulers number the text area only, a number gives way to an indent marker on
@@ -5946,4 +5952,18 @@ fn a_linked_text_box_shows_and_follows_its_link_from_inside() {
     let s = &h.state().session;
     let (start, _) = wordcraft_engine::cmd::insert::bookmark_range(&s.doc, "Spot").unwrap();
     assert!(s.sel.is_collapsed() && s.sel.focus == start, "the caret went to the bookmark: {:?}", s.sel);
+}
+
+/// WordZ: the vertical ruler measures the caret's page while it shows, else the page in view,
+/// so scrolling a long document away from the caret doesn't blank it.
+#[test]
+fn vertical_ruler_follows_the_page_in_view() {
+    let v = Rect::from_min_max(pos2(0.0, 100.0), pos2(20.0, 700.0));
+    let page = |top: f32| Rect::from_min_size(pos2(40.0, top), vec2(600.0, 800.0));
+    let rects = [page(-2000.0), page(-1180.0), page(-360.0), page(460.0)];
+    assert_eq!(super::rulers::vertical_page(0, &rects, v), 2, "the caret's page is out of view");
+    assert_eq!(super::rulers::vertical_page(2, &rects, v), 2, "the caret's page shows");
+    assert_eq!(super::rulers::vertical_page(3, &rects, v), 3, "a quarter of the strip is enough");
+    let side = [page(0.0), Rect::from_min_size(pos2(700.0, 0.0), vec2(600.0, 800.0)), page(-3000.0)];
+    assert_eq!(super::rulers::vertical_page(2, &side, v), 0, "of pages side by side, the first");
 }
