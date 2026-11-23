@@ -1,0 +1,58 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Simplified MSI for building on Linux with wixl (msitools): packaging/windows/msi-linux.sh.
+     The official installer is wordcraft.wxs (WiX v5, built on Windows by package.ps1); wixl reads
+     the older WiX v3 schema and has no installer dialogs, so this one installs per machine with
+     a progress bar only. Its own UpgradeCode keeps it apart from the official package. -->
+<Wix xmlns="http://schemas.microsoft.com/wix/2006/wi">
+  <Product Id="*" Name="WordZ" Manufacturer="WordZ" Version="$(var.Version)"
+           UpgradeCode="6B1E2C4A-8F3D-4E57-9A21-3C5D7E9F1B42" Language="1033" Codepage="1252">
+    <Package InstallerVersion="500" Compressed="yes" InstallScope="perMachine"
+             Description="WordZ word processor" Manufacturer="WordZ" />
+    <MajorUpgrade AllowSameVersionUpgrades="yes" DowngradeErrorMessage="A newer version of WordZ is already installed." />
+    <Media Id="1" Cabinet="wordcraft.cab" EmbedCab="yes" />
+    <Icon Id="WordcraftIcon.ico" SourceFile="$(var.IconPath)" />
+    <Property Id="ARPPRODUCTICON" Value="WordcraftIcon.ico" />
+
+    <Directory Id="TARGETDIR" Name="SourceDir">
+      <Directory Id="ProgramFiles64Folder">
+        <Directory Id="INSTALLFOLDER" Name="WordZ">
+          <Component Id="WordcraftApp" Guid="3F6A1D2B-5C7E-4A89-B0D1-2E4F6A8C0B13" Win64="yes">
+            <File Id="WordcraftExe" Name="wordcraft.exe" Source="$(var.BinDir)/wordcraft.exe" KeyPath="yes" />
+            <RegistryValue Root="HKLM" Key="Software\Microsoft\Windows\CurrentVersion\App Paths\wordcraft.exe" Value="[#WordcraftExe]" Type="string" />
+          </Component>
+          <Component Id="WordcraftCli" Guid="9C2B4E6D-1A3F-4B57-8D90-6E1F3A5C7D24" Win64="yes">
+            <File Id="WordcraftCliExe" Name="wordcraft-cli.exe" Source="$(var.BinDir)/wordcraft-cli.exe" KeyPath="yes" />
+          </Component>
+          <!-- "Open with" for the document types; never takes over an extension's default. -->
+          <Component Id="WordcraftFileTypes" Guid="D4E6F8A0-2B4C-4D6E-8F01-3A5B7C9D1E35" Win64="yes">
+            <RegistryValue Root="HKLM" Key="Software\Classes\Applications\wordcraft.exe" Name="FriendlyAppName" Value="WordZ" Type="string" KeyPath="yes" />
+            <RegistryValue Root="HKLM" Key="Software\Classes\Applications\wordcraft.exe\shell\open\command" Value="&quot;[#WordcraftExe]&quot; &quot;%1&quot;" Type="string" />
+            <RegistryValue Root="HKLM" Key="Software\Classes\WordCraft.Document" Value="WordZ Document" Type="string" />
+            <RegistryValue Root="HKLM" Key="Software\Classes\WordCraft.Document\DefaultIcon" Value="&quot;[#WordcraftExe]&quot;,0" Type="string" />
+            <RegistryValue Root="HKLM" Key="Software\Classes\WordCraft.Document\shell\open\command" Value="&quot;[#WordcraftExe]&quot; &quot;%1&quot;" Type="string" />
+            <RegistryValue Root="HKLM" Key="Software\Classes\.docx\OpenWithProgids" Name="WordCraft.Document" Value="" Type="string" />
+            <RegistryValue Root="HKLM" Key="Software\Classes\.doc\OpenWithProgids" Name="WordCraft.Document" Value="" Type="string" />
+            <RegistryValue Root="HKLM" Key="Software\Classes\.dotx\OpenWithProgids" Name="WordCraft.Document" Value="" Type="string" />
+            <RegistryValue Root="HKLM" Key="Software\Classes\.rtf\OpenWithProgids" Name="WordCraft.Document" Value="" Type="string" />
+            <RegistryValue Root="HKLM" Key="Software\Classes\.odt\OpenWithProgids" Name="WordCraft.Document" Value="" Type="string" />
+            <RegistryValue Root="HKLM" Key="Software\Classes\.md\OpenWithProgids" Name="WordCraft.Document" Value="" Type="string" />
+          </Component>
+        </Directory>
+      </Directory>
+      <Directory Id="ProgramMenuFolder">
+        <Component Id="StartMenuShortcut" Guid="7A9C1E3F-4B6D-4F80-A2C4-5E7F9B1D3A46" Win64="yes">
+          <Shortcut Id="WordcraftShortcut" Name="WordZ" Description="WordZ word processor"
+                    Target="[#WordcraftExe]" WorkingDirectory="INSTALLFOLDER" Icon="WordcraftIcon.ico" />
+          <RegistryValue Root="HKLM" Key="Software\WordCraft" Name="StartMenuShortcut" Value="1" Type="integer" KeyPath="yes" />
+        </Component>
+      </Directory>
+    </Directory>
+
+    <Feature Id="Main" Title="WordZ" Level="1">
+      <ComponentRef Id="WordcraftApp" />
+      <ComponentRef Id="WordcraftCli" />
+      <ComponentRef Id="WordcraftFileTypes" />
+      <ComponentRef Id="StartMenuShortcut" />
+    </Feature>
+  </Product>
+</Wix>
