@@ -686,10 +686,26 @@ fn update_caret_scroll(app: &mut WordApp, view: &CanvasView) -> Option<Rect> {
             pos2(pr.min.x + c.x * view.geo.scale, pr.min.y + c.top * view.geo.scale),
             vec2((c.width * view.geo.scale).max(2.0), c.height * view.geo.scale),
         );
-        target = Some(r.expand2(vec2(40.0, 60.0)));
+        target = tall_caret_target(r, Rect::from_min_size(app.canvas.scroll_offset.to_pos2(), view.area.size()));
     }
     app.canvas.scroll_to_caret = false;
     target
+}
+
+/// Where to scroll for the caret rect `r` (content coordinates), given the `visible` part of the
+/// content. A caret taller than the view (a selected picture that fills the page, zoomed in)
+/// can't be shown whole: scrolling to it threw the view past it, onto the next page. While it
+/// shows at all the view stays put; else the view goes to its top.
+fn tall_caret_target(r: Rect, visible: Rect) -> Option<Rect> {
+    let margin = vec2(40.0, 60.0);
+    if r.height() + 2.0 * margin.y <= visible.height() {
+        return Some(r.expand2(margin));
+    }
+    if r.intersects(visible) {
+        return None;
+    }
+    let h = (visible.height() - 2.0 * margin.y).max(1.0);
+    Some(Rect::from_min_size(r.min, vec2(r.width(), h)).expand2(margin))
 }
 
 struct ScrollMotion {

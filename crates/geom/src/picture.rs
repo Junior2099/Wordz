@@ -130,6 +130,68 @@ pub fn encode_format(img: &DynamicImage, format: ImageFormat) -> Result<Vec<u8>,
     codec_encode(&codec_img, codec_fmt, &EncodeOptions::default()).map_err(|e| e.to_string())
 }
 
+/// Whether `bytes` are an AVIF picture: an ISO-BMFF `ftyp` box naming the `avif` or `avis` brand.
+pub fn is_avif(bytes: &[u8]) -> bool {
+    if bytes.get(4..8) != Some(b"ftyp") {
+        return false;
+    }
+    let size = bytes.get(..4).map_or(0, |b| u32::from_be_bytes([b[0], b[1], b[2], b[3]]) as usize);
+    let ftyp = bytes.get(8..size.clamp(16, 256).min(bytes.len())).unwrap_or(&[]);
+    // The major brand, then (after the minor version) the compatible brands.
+    ftyp.chunks_exact(4).enumerate().any(|(i, b)| i != 1 && (b == b"avif" || b == b"avis"))
+}
+
+/// Most pixels an AVIF picture may have to be converted (as a pasted picture: 200 MB of RGBA).
+const MAX_AVIF_PIXELS: u64 = 50_000_000;
+
+/// An AVIF picture re-encoded as PNG, which documents can hold (Word doesn't read AVIF).
+///
+/// # Errors
+///
+/// `Refusal::Broken` when the AVIF can't be decoded, `Refusal::TooLarge` when it has too many pixels.
+pub fn avif_to_png(bytes: &[u8]) -> Result<Vec<u8>, Refusal> {
+    let image = avif_decode::Decoder::from_avif(bytes).map_err(broken)?.to_image().map_err(broken)?;
+    let too_large = |w: usize, h: usize| (w as u64).saturating_mul(h as u64) > MAX_AVIF_PIXELS;
+    let size = |w: usize, h: usize| -> Result<(u32, u32), Refusal> {
+        let (w32, h32) = (u32::try_from(w).unwrap_or(u32::MAX), u32::try_from(h).unwrap_or(u32::MAX));
+        if too_large(w, h) { Err(Refusal::TooLarge { width: w32, height: h32 }) } else { Ok((w32, h32)) }
+    };
+    let bad = || Refusal::Broken("the AVIF picture's pixels don't match its size".into());
+    let img = match image {
+        avif_decode::Image::Rgb8(i) => {
+            let (buf, w, h) = i.into_contiguous_buf();
+            let (w, h) = size(w, h)?;
+            DynamicImage::ImageRgb8(ImageBuffer::from_raw(w, h, buf.iter().flat_map(|p| [p.r, p.g, p.b]).collect()).ok_or_else(bad)?)
+        }
+        avif_decode::Image::Rgba8(i) => {
+            let (buf, w, h) = i.into_contiguous_buf();
+            let (w, h) = size(w, h)?;
+            DynamicImage::ImageRgba8(ImageBuffer::from_raw(w, h, buf.iter().flat_map(|p| [p.r, p.g, p.b, p.a]).collect()).ok_or_else(bad)?)
+        }
+        avif_decode::Image::Gray8(i) => {
+            let (buf, w, h) = i.into_contiguous_buf();
+            let (w, h) = size(w, h)?;
+            DynamicImage::ImageLuma8(ImageBuffer::from_raw(w, h, buf.iter().map(|p| p.value()).collect()).ok_or_else(bad)?)
+        }
+        avif_decode::Image::Rgb16(i) => {
+            let (buf, w, h) = i.into_contiguous_buf();
+            let (w, h) = size(w, h)?;
+            DynamicImage::ImageRgb16(ImageBuffer::from_raw(w, h, buf.iter().flat_map(|p| [p.r, p.g, p.b]).collect()).ok_or_else(bad)?)
+        }
+        avif_decode::Image::Rgba16(i) => {
+            let (buf, w, h) = i.into_contiguous_buf();
+            let (w, h) = size(w, h)?;
+            DynamicImage::ImageRgba16(ImageBuffer::from_raw(w, h, buf.iter().flat_map(|p| [p.r, p.g, p.b, p.a]).collect()).ok_or_else(bad)?)
+        }
+        avif_decode::Image::Gray16(i) => {
+            let (buf, w, h) = i.into_contiguous_buf();
+            let (w, h) = size(w, h)?;
+            DynamicImage::ImageLuma16(ImageBuffer::from_raw(w, h, buf.iter().map(|p| p.value()).collect()).ok_or_else(bad)?)
+        }
+    };
+    encode_png(&img).map_err(Refusal::Broken)
+}
+
 /// Decode a raster image from memory using `craft-image-codecs` with default limits.
 pub fn decode_memory(bytes: &[u8]) -> Result<DynamicImage, Refusal> {
     let codec_fmt = detect(bytes).ok_or(Refusal::NotAPicture)?;
@@ -429,6 +491,34 @@ fn tiff_compression(bytes: &[u8]) -> Option<u16> {
 
 #[cfg(test)]
 mod tests {
+    /// WordZ: AVIF is told by its `ftyp` brands, and converts to a PNG of the same size. The
+    /// conversion runs on the file `WORDZ_AVIF` names, when set.
+    #[test]
+    fn avif_is_recognised_and_converted_to_png() {
+        let ftyp = |major: &[u8; 4], compat: &[u8; 4]| {
+            let mut b = 24u32.to_be_bytes().to_vec();
+            b.extend_from_slice(b"ftyp");
+            b.extend_from_slice(major);
+            b.extend_from_slice(&[0, 0, 0, 0]);
+            b.extend_from_slice(b"mif1");
+            b.extend_from_slice(compat);
+            b
+        };
+        assert!(is_avif(&ftyp(b"avif", b"miaf")));
+        assert!(is_avif(&ftyp(b"mif1", b"avif")), "a compatible brand counts");
+        assert!(!is_avif(&ftyp(b"heic", b"mif1")), "HEIC isn't AVIF");
+        assert!(!is_avif(b"\x89PNG\r\n\x1a\n"));
+        assert!(avif_to_png(&ftyp(b"avif", b"miaf")).is_err(), "a header alone is broken");
+        if let Some(path) = std::env::var_os("WORDZ_AVIF") {
+            let bytes = std::fs::read(path).unwrap();
+            let png = avif_to_png(&bytes).unwrap();
+            let p = probe(&png).unwrap();
+            assert_eq!(p.format, ImageFormat::Png);
+            assert!(p.width > 0 && p.height > 0);
+            eprintln!("AVIF → PNG {}×{}", p.width, p.height);
+        }
+    }
+
     use super::*;
 
     // Hand-written reader the shared probe replaced; kept as the oracle.

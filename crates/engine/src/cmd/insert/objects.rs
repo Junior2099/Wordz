@@ -107,6 +107,12 @@ fn place_picture(s: &mut Session, bytes: Vec<u8>, width: Option<f32>, alt: &str)
     if bytes.len() > 200 << 20 {
         return Err(CmdError::Failed("image is larger than 200 MB".into()));
     }
+    // WordZ: an AVIF picture goes in as PNG, which Word and the rest of WordZ read.
+    let bytes = if wordcraft_geom::picture::is_avif(&bytes) {
+        wordcraft_geom::picture::avif_to_png(&bytes).map_err(|e| CmdError::Failed(format!("the AVIF picture couldn't be read: {e}")))?
+    } else {
+        bytes
+    };
     // Natural size: pixels at 96 ppi, or a metafile's own frame (WMF, EMF: #802). A picture that
     // is never decoded (a TIFF with JPEG strips, #3645) isn't inserted.
     let (natural_w, natural_h, ext) = match wordcraft_geom::picture::probe(&bytes) {
@@ -114,7 +120,7 @@ fn place_picture(s: &mut Session, bytes: Vec<u8>, width: Option<f32>, alt: &str)
         Err(wordcraft_geom::picture::Refusal::Unsupported(why)) => return Err(CmdError::Failed(why.into())),
         Err(_) => match wordcraft_render::metafile_size(&bytes) {
             Some(size) => size,
-            None => return Err(CmdError::Failed("not a supported image (PNG, JPEG, GIF, WebP, BMP, WMF, EMF)".into())),
+            None => return Err(CmdError::Failed("not a supported image (PNG, JPEG, GIF, WebP, AVIF, BMP, WMF, EMF)".into())),
         },
     };
     let key = s.doc.add_media(bytes, ext);

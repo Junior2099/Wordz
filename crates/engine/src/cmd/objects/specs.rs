@@ -132,6 +132,12 @@ pub fn specs() -> Vec<CommandSpec> {
             } else {
                 return Err(CmdError::Params("`path` or `data` required".into()));
             };
+            // WordZ: an AVIF replacement goes in as PNG, as Insert › Pictures does.
+            let bytes = if wordcraft_geom::picture::is_avif(&bytes) {
+                wordcraft_geom::picture::avif_to_png(&bytes).map_err(|e| CmdError::Failed(format!("the AVIF picture couldn't be read: {e}")))?
+            } else {
+                bytes
+            };
             let (px_w, px_h) = wordcraft_geom::picture::probe(&bytes)
                 .map(|p| (p.width, p.height))
                 .map_err(|e| match e {

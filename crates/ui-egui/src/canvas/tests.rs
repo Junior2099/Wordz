@@ -5967,3 +5967,17 @@ fn vertical_ruler_follows_the_page_in_view() {
     let side = [page(0.0), Rect::from_min_size(pos2(700.0, 0.0), vec2(600.0, 800.0)), page(-3000.0)];
     assert_eq!(super::rulers::vertical_page(2, &side, v), 0, "of pages side by side, the first");
 }
+
+/// WordZ: selecting a picture taller than the view (zoomed in on a page full of pictures) keeps
+/// the view still while the picture shows, instead of throwing it onto the next page.
+#[test]
+fn a_selected_picture_taller_than_the_view_keeps_the_view() {
+    let visible = Rect::from_min_size(pos2(0.0, 1000.0), vec2(1200.0, 700.0));
+    let tall = Rect::from_min_size(pos2(100.0, 900.0), vec2(800.0, 1100.0));
+    assert_eq!(super::tall_caret_target(tall, visible), None, "it shows: no scroll");
+    let away = tall.translate(vec2(0.0, 3000.0));
+    let t = super::tall_caret_target(away, visible).expect("out of view: scroll to it");
+    assert!(t.min.y < away.min.y && t.height() <= visible.height() + 1.0, "to its top: {t:?}");
+    let caret = Rect::from_min_size(pos2(100.0, 1900.0), vec2(2.0, 16.0));
+    assert_eq!(super::tall_caret_target(caret, visible), Some(caret.expand2(vec2(40.0, 60.0))), "a caret scrolls as before");
+}
